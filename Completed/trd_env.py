@@ -33,10 +33,7 @@ class trading_env(gym.Env):
         self.max_no_shares = 10000
     
     
-        #state/observation space
-        self.action_space = spaces.Box(low=np.array([0,0]),high=np.array([3,1]),dtype=np.float16)
-        #Consider Volumne, Close, Return, MACD,RSI, EMA, Porfolio(current_capital,portfolio_value,returns, no_stocks_owned,avg_cost,no_stocks_sold )
-        self.observation_space = spaces.Box(low=0.0,high= 1.0,shape=(7,6))
+
     
     
     def observation(self):
@@ -70,7 +67,7 @@ class trading_env(gym.Env):
         
         delay = self.current_step/self.max_steps
         
-        reward = self.returns * delay
+        reward = self.portfolio_value * delay
         
         if self.current_step == len(self.df):
             self.done = True
@@ -100,31 +97,32 @@ class trading_env(gym.Env):
         
         if action_taken == 2: # Buy
             total_possible = self.current_capital/current_price
-            amount_stocks_bought = total_possible * self.amount
+            amount_stocks_bought = total_possible
             current_cost = amount_stocks_bought * current_price
             self.buy_cost += current_cost
             self.no_stocks_bought += amount_stocks_bought
             self.current_stocks_held += amount_stocks_bought
             self.avg_cost = float(self.buy_cost) / float(self.current_stocks_held)
-            self.current_capital -= current_cost
-            self.returns = self.avg_cost - current_cost  #attemps to incentivise buying behaviour at prices lower than the average cost
+            self.current_capital -= current_cost #attemps to incentivise buying behaviour at prices lower than the average cost
+            self.portfolio_value = self.current_capital + (self.current_stocks_held*current_price)
             
         elif action_taken == 0: #Sell
             #can probably do and if else statement to check if there is any stocks bought if not do nothing
-            if self.current_stocks_held == 0:
-                None
+            if self.current_stocks_held >= 0.000001:
+                self.portfolio_value -= self.portfolio_value *0.1
             else:
-                shares_sell = self.current_stocks_held * self.amount
+                shares_sell = self.current_stocks_held
                 profit = shares_sell * current_price
                 self.no_stocks_sold += shares_sell
                 self.current_stocks_held -= shares_sell
                 self.current_capital += profit
                 self.returns = profit - (shares_sell * self.avg_cost)
                 self.buy_cost -= shares_sell * self.avg_cost
+                self.portfolio_value = self.current_capital + (self.current_stocks_held*current_price)
             
             
         elif action_taken == 1:
-            self.returns = (current_price*self.current_stocks_held)-(self.current_stocks_held*self.avg_cost) #holding should only be considered beneficial if current price of all assets > average price of assets, besides that selling is better
+             self.portfolio_value -= self.portfolio_value *0.1 #holding should only be considered beneficial if current price of all assets > average price of assets, besides that selling is better
             
         if self.current_capital > self.max_capital:
             self.max_capital = self.current_capital
@@ -159,4 +157,5 @@ class trading_env(gym.Env):
     def reward_output(self):
         return_value = self.portfolio_value-self.initial_capital
         return_perc = (self.portfolio_value/self.initial_capital) * 100
-        return return_perc, return_value, self.no_stocks_bought,self.no_stocks_sold
+        return return_perc, return_value, self.no_stocks_bought, self.no_stocks_sold, self.current_stocks_held
+
