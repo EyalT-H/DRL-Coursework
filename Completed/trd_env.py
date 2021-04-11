@@ -25,6 +25,7 @@ class trading_env(gym.Env):
         self.buy_cost = None
         self.returns = None
         self.max_steps = None
+        self.previous_portfolio_value = None
     
         #Values for normalising data
         self.max_stock_price = max(self.df["Close"])
@@ -37,23 +38,6 @@ class trading_env(gym.Env):
     
     
     def observation(self):
-        #-6 the predefined lookback window 
-#         env_observations = np.array([self.df.loc[self.current_step-5:self.current_step,"Close"].values/self.max_stock_price,
-#                                     self.df.loc[self.current_step-5:self.current_step,"Volume_(BTC)"].values/self.max_volume,
-#                                     self.df.loc[self.current_step-5:self.current_step,"MACD_status"].values,
-#                                     self.df.loc[self.current_step-5:self.current_step,"RSI_status"].values,
-#                                     self.df.loc[self.current_step-5:self.current_step,"EMA_status"].values,
-#                                     self.df.loc[self.current_step-5:self.current_step,"3D_return_norm"].values]
-#                                    ) #Not required for Q-learning, only using 2 variables, combined_indicators & return_norm
-        
-#         obs = np.append(env_observations,[[
-#             self.current_capital/self.max_capital,
-#             self.portfolio_value/self.max_capital,
-#             self.returns/self.initial_capital, # not sure how to normalise returns since it can be a negative value
-#             self.no_stocks_bought/self.max_no_shares,
-#             self.no_stocks_sold/self.max_no_shares,
-#             self.avg_cost/self.max_stock_price
-#         ]],axis = 0)
         obs = np.array([self.df.loc[self.current_step,"3D_return_norm"], self.df.loc[self.current_step,"MACD_status"],self.df.loc[self.current_step,"RSI_status"],self.df.loc[self.current_step,"EMA_status"]])
         
         return obs
@@ -67,7 +51,7 @@ class trading_env(gym.Env):
         
         delay = self.current_step/self.max_steps
         
-        reward = self.portfolio_value * delay
+        reward = (self.portfolio_value-self.previous_portfolio_value)/self.previous_portfolio_value
         
         if self.current_step == len(self.df):
             self.done = True
@@ -97,32 +81,36 @@ class trading_env(gym.Env):
         
         if action_taken == 2: # Buy
             total_possible = self.current_capital/current_price
-            amount_stocks_bought = total_possible
+            amount_stocks_bought = total_possible * self.amount
             current_cost = amount_stocks_bought * current_price
             self.buy_cost += current_cost
             self.no_stocks_bought += amount_stocks_bought
             self.current_stocks_held += amount_stocks_bought
             self.avg_cost = float(self.buy_cost) / float(self.current_stocks_held)
             self.current_capital -= current_cost #attemps to incentivise buying behaviour at prices lower than the average cost
+            self.previous_portfolio_value = self.portfolio_value 
             self.portfolio_value = self.current_capital + (self.current_stocks_held*current_price)
             
         elif action_taken == 0: #Sell
             #can probably do and if else statement to check if there is any stocks bought if not do nothing
-            if self.current_stocks_held >= 0.000001:
-                self.portfolio_value -= self.portfolio_value *0.1
-            else:
-                shares_sell = self.current_stocks_held
+            #if self.current_stocks_held <= 0.000001:
+             #   self.previous_portfolio_value = self.portfolio_value 
+              #  self.portfolio_value -= self.portfolio_value *0.1
+           # else:
+                shares_sell = self.current_stocks_held * self.amount
                 profit = shares_sell * current_price
                 self.no_stocks_sold += shares_sell
                 self.current_stocks_held -= shares_sell
                 self.current_capital += profit
                 self.returns = profit - (shares_sell * self.avg_cost)
                 self.buy_cost -= shares_sell * self.avg_cost
+                self.previous_portfolio_value = self.portfolio_value 
                 self.portfolio_value = self.current_capital + (self.current_stocks_held*current_price)
             
             
         elif action_taken == 1:
-             self.portfolio_value -= self.portfolio_value *0.1 #holding should only be considered beneficial if current price of all assets > average price of assets, besides that selling is better
+            self.previous_portfolio_value = self.portfolio_value 
+            self.portfolio_value -= self.portfolio_value *0.1 #holding should only be considered beneficial if current price of all assets > average price of assets, besides that selling is better
             
         if self.current_capital > self.max_capital:
             self.max_capital = self.current_capital
@@ -140,6 +128,7 @@ class trading_env(gym.Env):
         self.max_steps = len(self.df)
         self.current_step = 0
         self.buy_cost = 0
+        self.previous_portfolio_value = 0
         self.done = False
         
         return self.observation()
@@ -147,7 +136,7 @@ class trading_env(gym.Env):
     def render(self):
         current_price = random.uniform(self.df.loc[self.current_step, "Open"],self.df.loc[self.current_step,"Close"])
         self.portfolio_value = self.current_capital + (self.current_stocks_held*current_price)
-        return_perc = (self.portfolio_value/self.initial_capital) * 100
+        return_perc = (self.portfolio_value-self.initial_capital)/self.initial_capital * 100
         
         print(f"Current Porfolio Value:{self.portfolio_value}; Available Capital: {self.current_capital}; Current Stocks Held: {self.current_stocks_held}")
         print(f"No. Stocks Bought:{self.no_stocks_bought}; No. Stocks Sold:{self.no_stocks_sold}; Average Cost:{self.avg_cost} ")
@@ -157,5 +146,4 @@ class trading_env(gym.Env):
     def reward_output(self):
         return_value = self.portfolio_value-self.initial_capital
         return_perc = (self.portfolio_value/self.initial_capital) * 100
-        return return_perc, return_value, self.no_stocks_bought, self.no_stocks_sold, self.current_stocks_held
-
+        return return_perc, return_value, self.no_stocks_bought,self.no_stocks_sold,  self.current_stocks_held
